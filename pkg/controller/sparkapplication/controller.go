@@ -92,7 +92,8 @@ func NewController(
 	ingressURLFormat string,
 	ingressClassName string,
 	batchSchedulerMgr *batchscheduler.SchedulerManager,
-	enableUIService bool) *Controller {
+	enableUIService bool,
+) *Controller {
 	crdscheme.AddToScheme(scheme.Scheme)
 
 	eventBroadcaster := record.NewBroadcaster()
@@ -100,9 +101,23 @@ func NewController(
 	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{
 		Interface: kubeClient.CoreV1().Events(namespace),
 	})
-	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, apiv1.EventSource{Component: "spark-operator"})
+	recorder := eventBroadcaster.NewRecorder(
+		scheme.Scheme,
+		apiv1.EventSource{Component: "spark-operator"},
+	)
 
-	return newSparkApplicationController(crdClient, kubeClient, crdInformerFactory, podInformerFactory, recorder, metricsConfig, ingressURLFormat, ingressClassName, batchSchedulerMgr, enableUIService)
+	return newSparkApplicationController(
+		crdClient,
+		kubeClient,
+		crdInformerFactory,
+		podInformerFactory,
+		recorder,
+		metricsConfig,
+		ingressURLFormat,
+		ingressClassName,
+		batchSchedulerMgr,
+		enableUIService,
+	)
 }
 
 func newSparkApplicationController(
@@ -115,9 +130,14 @@ func newSparkApplicationController(
 	ingressURLFormat string,
 	ingressClassName string,
 	batchSchedulerMgr *batchscheduler.SchedulerManager,
-	enableUIService bool) *Controller {
-	queue := workqueue.NewNamedRateLimitingQueue(&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(queueTokenRefillRate), queueTokenBucketSize)},
-		"spark-application-controller")
+	enableUIService bool,
+) *Controller {
+	queue := workqueue.NewNamedRateLimitingQueue(
+		&workqueue.BucketRateLimiter{
+			Limiter: rate.NewLimiter(rate.Limit(queueTokenRefillRate), queueTokenBucketSize),
+		},
+		"spark-application-controller",
+	)
 
 	controller := &Controller{
 		crdClient:         crdClient,
@@ -144,7 +164,10 @@ func newSparkApplicationController(
 	controller.applicationLister = crdInformer.Lister()
 
 	podsInformer := podInformerFactory.Core().V1().Pods()
-	sparkPodEventHandler := newSparkPodEventHandler(controller.queue.AddRateLimited, controller.applicationLister)
+	sparkPodEventHandler := newSparkPodEventHandler(
+		controller.queue.AddRateLimited,
+		controller.applicationLister,
+	)
 	podsInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    sparkPodEventHandler.onPodAdded,
 		UpdateFunc: sparkPodEventHandler.onPodUpdated,
@@ -185,7 +208,11 @@ func (c *Controller) Stop() {
 // Callback function called when a new SparkApplication object gets created.
 func (c *Controller) onAdd(obj interface{}) {
 	app := obj.(*v1beta2.SparkApplication)
-	glog.Infof("SparkApplication %s/%s was added, enqueuing it for submission", app.Namespace, app.Name)
+	glog.Infof(
+		"SparkApplication %s/%s was added, enqueuing it for submission",
+		app.Namespace,
+		app.Name,
+	)
 	c.enqueue(app)
 }
 
@@ -195,7 +222,8 @@ func (c *Controller) onUpdate(oldObj, newObj interface{}) {
 
 	// The informer will call this function on non-updated resources during resync, avoid
 	// enqueuing unchanged applications, unless it has expired or is subject to retry.
-	if oldApp.ResourceVersion == newApp.ResourceVersion && !c.hasApplicationExpired(newApp) && !shouldRetry(newApp) {
+	if oldApp.ResourceVersion == newApp.ResourceVersion && !c.hasApplicationExpired(newApp) &&
+		!shouldRetry(newApp) {
 		return
 	}
 
@@ -224,7 +252,8 @@ func (c *Controller) onUpdate(oldObj, newObj interface{}) {
 			newApp.Name)
 	}
 
-	glog.V(2).Infof("SparkApplication %s/%s was updated, enqueuing it", newApp.Namespace, newApp.Name)
+	glog.V(2).
+		Infof("SparkApplication %s/%s was updated, enqueuing it", newApp.Namespace, newApp.Name)
 	c.enqueue(newApp)
 }
 
@@ -287,7 +316,12 @@ func (c *Controller) getExecutorPods(app *v1beta2.SparkApplication) ([]*apiv1.Po
 	selector := labels.SelectorFromSet(labels.Set(matchLabels))
 	pods, err := c.podLister.Pods(app.Namespace).List(selector)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pods for SparkApplication %s/%s: %v", app.Namespace, app.Name, err)
+		return nil, fmt.Errorf(
+			"failed to get pods for SparkApplication %s/%s: %v",
+			app.Namespace,
+			app.Name,
+			err,
+		)
 	}
 	return pods, nil
 }
@@ -298,16 +332,26 @@ func (c *Controller) getDriverPod(app *v1beta2.SparkApplication) (*apiv1.Pod, er
 		return pod, nil
 	}
 	if !errors.IsNotFound(err) {
-		return nil, fmt.Errorf("failed to get driver pod %s: %v", app.Status.DriverInfo.PodName, err)
+		return nil, fmt.Errorf(
+			"failed to get driver pod %s: %v",
+			app.Status.DriverInfo.PodName,
+			err,
+		)
 	}
 
 	// The driver pod was not found in the informer cache, try getting it directly from the API server.
-	pod, err = c.kubeClient.CoreV1().Pods(app.Namespace).Get(context.TODO(), app.Status.DriverInfo.PodName, metav1.GetOptions{})
+	pod, err = c.kubeClient.CoreV1().
+		Pods(app.Namespace).
+		Get(context.TODO(), app.Status.DriverInfo.PodName, metav1.GetOptions{})
 	if err == nil {
 		return pod, nil
 	}
 	if !errors.IsNotFound(err) {
-		return nil, fmt.Errorf("failed to get driver pod %s: %v", app.Status.DriverInfo.PodName, err)
+		return nil, fmt.Errorf(
+			"failed to get driver pod %s: %v",
+			app.Status.DriverInfo.PodName,
+			err,
+		)
 	}
 	// Driver pod was not found on the API server either.
 	return nil, nil
@@ -318,7 +362,10 @@ func (c *Controller) getDriverPod(app *v1beta2.SparkApplication) (*apiv1.Pod, er
 func (c *Controller) getAndUpdateDriverState(app *v1beta2.SparkApplication) error {
 	// Either the driver pod doesn't exist yet or its name has not been updated.
 	if app.Status.DriverInfo.PodName == "" {
-		return fmt.Errorf("empty driver pod name with application state %s", app.Status.AppState.State)
+		return fmt.Errorf(
+			"empty driver pod name with application state %s",
+			app.Status.AppState.State,
+		)
 	}
 
 	driverPod, err := c.getDriverPod(app)
@@ -344,7 +391,11 @@ func (c *Controller) getAndUpdateDriverState(app *v1beta2.SparkApplication) erro
 			state := getDriverContainerTerminatedState(driverPod.Status)
 			if state != nil {
 				if state.ExitCode != 0 {
-					app.Status.AppState.ErrorMessage = fmt.Sprintf("driver container failed with ExitCode: %d, Reason: %s", state.ExitCode, state.Reason)
+					app.Status.AppState.ErrorMessage = fmt.Sprintf(
+						"driver container failed with ExitCode: %d, Reason: %s",
+						state.ExitCode,
+						state.Reason,
+					)
 				}
 			} else {
 				app.Status.AppState.ErrorMessage = "driver container status missing"
@@ -381,7 +432,13 @@ func (c *Controller) getAndUpdateExecutorState(app *v1beta2.SparkApplication) er
 				if newState == v1beta2.ExecutorFailedState {
 					execContainerState := getExecutorContainerTerminatedState(pod.Status)
 					if execContainerState != nil {
-						c.recordExecutorEvent(app, newState, pod.Name, execContainerState.ExitCode, execContainerState.Reason)
+						c.recordExecutorEvent(
+							app,
+							newState,
+							pod.Name,
+							execContainerState.ExitCode,
+							execContainerState.Reason,
+						)
 					} else {
 						// If we can't find the container state,
 						// we need to set the exitCode and the Reason to unambiguous values.
@@ -451,7 +508,12 @@ func (c *Controller) handleSparkApplicationDeletion(app *v1beta2.SparkApplicatio
 	}
 	// SparkApplication deletion requested, lets delete driver pod.
 	if err := c.deleteSparkResources(app); err != nil {
-		glog.Errorf("failed to delete resources associated with deleted SparkApplication %s/%s: %v", app.Namespace, app.Name, err)
+		glog.Errorf(
+			"failed to delete resources associated with deleted SparkApplication %s/%s: %v",
+			app.Namespace,
+			app.Name,
+			err,
+		)
 	}
 }
 
@@ -579,6 +641,8 @@ func (c *Controller) syncSparkApplication(key string) error {
 		if !shouldRetry(appCopy) {
 			// App will never be retried. Move to terminal FailedState.
 			appCopy.Status.AppState.State = v1beta2.FailedState
+			// Ensure to set terminal time
+			appCopy.Status.TerminationTime = metav1.Now()
 			c.recordSparkApplicationEvent(appCopy)
 		} else if isNextRetryDue(appCopy.Spec.RestartPolicy.OnSubmissionFailureRetryInterval, appCopy.Status.SubmissionAttempts, appCopy.Status.LastSubmissionAttemptTime) {
 			if c.validateSparkResourceDeletion(appCopy) {
@@ -603,7 +667,8 @@ func (c *Controller) syncSparkApplication(key string) error {
 	case v1beta2.PendingRerunState:
 		glog.V(2).Infof("SparkApplication %s/%s is pending rerun", appCopy.Namespace, appCopy.Name)
 		if c.validateSparkResourceDeletion(appCopy) {
-			glog.V(2).Infof("Resources for SparkApplication %s/%s successfully deleted", appCopy.Namespace, appCopy.Name)
+			glog.V(2).
+				Infof("Resources for SparkApplication %s/%s successfully deleted", appCopy.Namespace, appCopy.Name)
 			c.recordSparkApplicationEvent(appCopy)
 			c.clearStatus(&appCopy.Status)
 			appCopy = c.submitSparkApplication(appCopy)
@@ -615,7 +680,9 @@ func (c *Controller) syncSparkApplication(key string) error {
 	case v1beta2.CompletedState, v1beta2.FailedState:
 		if c.hasApplicationExpired(app) {
 			glog.Infof("Garbage collecting expired SparkApplication %s/%s", app.Namespace, app.Name)
-			err := c.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Delete(context.TODO(), app.Name, metav1.DeleteOptions{GracePeriodSeconds: int64ptr(0)})
+			err := c.crdClient.SparkoperatorV1beta2().
+				SparkApplications(app.Namespace).
+				Delete(context.TODO(), app.Name, metav1.DeleteOptions{GracePeriodSeconds: int64ptr(0)})
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -636,7 +703,12 @@ func (c *Controller) syncSparkApplication(key string) error {
 		if state := appCopy.Status.AppState.State; state == v1beta2.CompletedState ||
 			state == v1beta2.FailedState {
 			if err := c.cleanUpOnTermination(app, appCopy); err != nil {
-				glog.Errorf("failed to clean up resources for SparkApplication %s/%s: %v", app.Namespace, app.Name, err)
+				glog.Errorf(
+					"failed to clean up resources for SparkApplication %s/%s: %v",
+					app.Namespace,
+					app.Name,
+					err,
+				)
 				return err
 			}
 		}
@@ -662,7 +734,9 @@ func isNextRetryDue(retryInterval *int64, attemptsDone int32, lastEventTime meta
 }
 
 // submitSparkApplication creates a new submission for the given SparkApplication and submits it using spark-submit.
-func (c *Controller) submitSparkApplication(app *v1beta2.SparkApplication) *v1beta2.SparkApplication {
+func (c *Controller) submitSparkApplication(
+	app *v1beta2.SparkApplication,
+) *v1beta2.SparkApplication {
 	if app.PrometheusMonitoringEnabled() {
 		if err := configPrometheusMonitoring(app, c.kubeClient); err != nil {
 			glog.Error(err)
@@ -673,7 +747,10 @@ func (c *Controller) submitSparkApplication(app *v1beta2.SparkApplication) *v1be
 	if needScheduling, scheduler := c.shouldDoBatchScheduling(app); needScheduling {
 		err := scheduler.DoBatchSchedulingOnSubmission(app)
 		if err != nil {
-			glog.Errorf("failed to process batch scheduler BeforeSubmitSparkApplication with error %v", err)
+			glog.Errorf(
+				"failed to process batch scheduler BeforeSubmitSparkApplication with error %v",
+				err,
+			)
 			return app
 		}
 	}
@@ -683,7 +760,12 @@ func (c *Controller) submitSparkApplication(app *v1beta2.SparkApplication) *v1be
 	if c.enableUIService {
 		service, err := createSparkUIService(app, c.kubeClient)
 		if err != nil {
-			glog.Errorf("failed to create UI service for SparkApplication %s/%s: %v", app.Namespace, app.Name, err)
+			glog.Errorf(
+				"failed to create UI service for SparkApplication %s/%s: %v",
+				app.Namespace,
+				app.Name,
+				err,
+			)
 		} else {
 			driverInfo.WebUIServiceName = service.serviceName
 			driverInfo.WebUIPort = service.servicePort
@@ -742,7 +824,12 @@ func (c *Controller) submitSparkApplication(app *v1beta2.SparkApplication) *v1be
 			LastSubmissionAttemptTime: metav1.Now(),
 		}
 		c.recordSparkApplicationEvent(app)
-		glog.Errorf("failed to run spark-submit for SparkApplication %s/%s: %v", app.Namespace, app.Name, err)
+		glog.Errorf(
+			"failed to run spark-submit for SparkApplication %s/%s: %v",
+			app.Namespace,
+			app.Name,
+			err,
+		)
 		return app
 	}
 	if !submitted {
@@ -768,8 +855,11 @@ func (c *Controller) submitSparkApplication(app *v1beta2.SparkApplication) *v1be
 	return app
 }
 
-func (c *Controller) shouldDoBatchScheduling(app *v1beta2.SparkApplication) (bool, schedulerinterface.BatchScheduler) {
-	if c.batchSchedulerMgr == nil || app.Spec.BatchScheduler == nil || *app.Spec.BatchScheduler == "" {
+func (c *Controller) shouldDoBatchScheduling(
+	app *v1beta2.SparkApplication,
+) (bool, schedulerinterface.BatchScheduler) {
+	if c.batchSchedulerMgr == nil || app.Spec.BatchScheduler == nil ||
+		*app.Spec.BatchScheduler == "" {
 		return false, nil
 	}
 
@@ -783,7 +873,8 @@ func (c *Controller) shouldDoBatchScheduling(app *v1beta2.SparkApplication) (boo
 
 func (c *Controller) updateApplicationStatusWithRetries(
 	original *v1beta2.SparkApplication,
-	updateFunc func(status *v1beta2.SparkApplicationStatus)) (*v1beta2.SparkApplication, error) {
+	updateFunc func(status *v1beta2.SparkApplicationStatus),
+) (*v1beta2.SparkApplication, error) {
 	toUpdate := original.DeepCopy()
 	updateErr := wait.ExponentialBackoff(retry.DefaultBackoff, func() (ok bool, err error) {
 		updateFunc(&toUpdate.Status)
@@ -791,7 +882,9 @@ func (c *Controller) updateApplicationStatusWithRetries(
 			return true, nil
 		}
 
-		toUpdate, err = c.crdClient.SparkoperatorV1beta2().SparkApplications(original.Namespace).UpdateStatus(context.TODO(), toUpdate, metav1.UpdateOptions{})
+		toUpdate, err = c.crdClient.SparkoperatorV1beta2().
+			SparkApplications(original.Namespace).
+			UpdateStatus(context.TODO(), toUpdate, metav1.UpdateOptions{})
 		if err == nil {
 			return true, nil
 		}
@@ -800,9 +893,16 @@ func (c *Controller) updateApplicationStatusWithRetries(
 		}
 
 		// There was a conflict updating the SparkApplication, fetch the latest version from the API server.
-		toUpdate, err = c.crdClient.SparkoperatorV1beta2().SparkApplications(original.Namespace).Get(context.TODO(), original.Name, metav1.GetOptions{})
+		toUpdate, err = c.crdClient.SparkoperatorV1beta2().
+			SparkApplications(original.Namespace).
+			Get(context.TODO(), original.Name, metav1.GetOptions{})
 		if err != nil {
-			glog.Errorf("failed to get SparkApplication %s/%s: %v", original.Namespace, original.Name, err)
+			glog.Errorf(
+				"failed to get SparkApplication %s/%s: %v",
+				original.Namespace,
+				original.Name,
+				err,
+			)
 			return false, err
 		}
 
@@ -811,7 +911,12 @@ func (c *Controller) updateApplicationStatusWithRetries(
 	})
 
 	if updateErr != nil {
-		glog.Errorf("failed to update SparkApplication %s/%s: %v", original.Namespace, original.Name, updateErr)
+		glog.Errorf(
+			"failed to update SparkApplication %s/%s: %v",
+			original.Namespace,
+			original.Name,
+			updateErr,
+		)
 		return nil, updateErr
 	}
 
@@ -834,10 +939,14 @@ func (c *Controller) updateStatusAndExportMetrics(oldApp, newApp *v1beta2.SparkA
 		return err
 	}
 
-	glog.V(2).Infof("Update the status of SparkApplication %s/%s from:\n%s\nto:\n%s", newApp.Namespace, newApp.Name, oldStatusJSON, newStatusJSON)
-	updatedApp, err := c.updateApplicationStatusWithRetries(oldApp, func(status *v1beta2.SparkApplicationStatus) {
-		*status = newApp.Status
-	})
+	glog.V(2).
+		Infof("Update the status of SparkApplication %s/%s from:\n%s\nto:\n%s", newApp.Namespace, newApp.Name, oldStatusJSON, newStatusJSON)
+	updatedApp, err := c.updateApplicationStatusWithRetries(
+		oldApp,
+		func(status *v1beta2.SparkApplicationStatus) {
+			*status = newApp.Status
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -850,7 +959,10 @@ func (c *Controller) updateStatusAndExportMetrics(oldApp, newApp *v1beta2.SparkA
 	return nil
 }
 
-func (c *Controller) getSparkApplication(namespace string, name string) (*v1beta2.SparkApplication, error) {
+func (c *Controller) getSparkApplication(
+	namespace string,
+	name string,
+) (*v1beta2.SparkApplication, error) {
 	app, err := c.applicationLister.SparkApplications(namespace).Get(name)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -871,15 +983,20 @@ func (c *Controller) deleteSparkResources(app *v1beta2.SparkApplication) error {
 	}
 
 	glog.V(2).Infof("Deleting pod %s in namespace %s", driverPodName, app.Namespace)
-	err := c.kubeClient.CoreV1().Pods(app.Namespace).Delete(context.TODO(), driverPodName, metav1.DeleteOptions{})
+	err := c.kubeClient.CoreV1().
+		Pods(app.Namespace).
+		Delete(context.TODO(), driverPodName, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
 	sparkUIServiceName := app.Status.DriverInfo.WebUIServiceName
 	if sparkUIServiceName != "" {
-		glog.V(2).Infof("Deleting Spark UI Service %s in namespace %s", sparkUIServiceName, app.Namespace)
-		err := c.kubeClient.CoreV1().Services(app.Namespace).Delete(context.TODO(), sparkUIServiceName, metav1.DeleteOptions{GracePeriodSeconds: int64ptr(0)})
+		glog.V(2).
+			Infof("Deleting Spark UI Service %s in namespace %s", sparkUIServiceName, app.Namespace)
+		err := c.kubeClient.CoreV1().
+			Services(app.Namespace).
+			Delete(context.TODO(), sparkUIServiceName, metav1.DeleteOptions{GracePeriodSeconds: int64ptr(0)})
 		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
@@ -888,15 +1005,21 @@ func (c *Controller) deleteSparkResources(app *v1beta2.SparkApplication) error {
 	sparkUIIngressName := app.Status.DriverInfo.WebUIIngressName
 	if sparkUIIngressName != "" {
 		if util.IngressCapabilities.Has("networking.k8s.io/v1") {
-			glog.V(2).Infof("Deleting Spark UI Ingress %s in namespace %s", sparkUIIngressName, app.Namespace)
-			err := c.kubeClient.NetworkingV1().Ingresses(app.Namespace).Delete(context.TODO(), sparkUIIngressName, metav1.DeleteOptions{GracePeriodSeconds: int64ptr(0)})
+			glog.V(2).
+				Infof("Deleting Spark UI Ingress %s in namespace %s", sparkUIIngressName, app.Namespace)
+			err := c.kubeClient.NetworkingV1().
+				Ingresses(app.Namespace).
+				Delete(context.TODO(), sparkUIIngressName, metav1.DeleteOptions{GracePeriodSeconds: int64ptr(0)})
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
 		}
 		if util.IngressCapabilities.Has("extensions/v1beta1") {
-			glog.V(2).Infof("Deleting extensions/v1beta1 Spark UI Ingress %s in namespace %s", sparkUIIngressName, app.Namespace)
-			err := c.kubeClient.ExtensionsV1beta1().Ingresses(app.Namespace).Delete(context.TODO(), sparkUIIngressName, metav1.DeleteOptions{GracePeriodSeconds: int64ptr(0)})
+			glog.V(2).
+				Infof("Deleting extensions/v1beta1 Spark UI Ingress %s in namespace %s", sparkUIIngressName, app.Namespace)
+			err := c.kubeClient.ExtensionsV1beta1().
+				Ingresses(app.Namespace).
+				Delete(context.TODO(), sparkUIIngressName, metav1.DeleteOptions{GracePeriodSeconds: int64ptr(0)})
 			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
@@ -910,8 +1033,11 @@ func (c *Controller) validateSparkApplication(app *v1beta2.SparkApplication) err
 	appSpec := app.Spec
 	driverSpec := appSpec.Driver
 	executorSpec := appSpec.Executor
-	if appSpec.NodeSelector != nil && (driverSpec.NodeSelector != nil || executorSpec.NodeSelector != nil) {
-		return fmt.Errorf("NodeSelector property can be defined at SparkApplication or at any of Driver,Executor")
+	if appSpec.NodeSelector != nil &&
+		(driverSpec.NodeSelector != nil || executorSpec.NodeSelector != nil) {
+		return fmt.Errorf(
+			"NodeSelector property can be defined at SparkApplication or at any of Driver,Executor",
+		)
 	}
 
 	return nil
@@ -925,14 +1051,18 @@ func (c *Controller) validateSparkResourceDeletion(app *v1beta2.SparkApplication
 	if driverPodName == "" {
 		driverPodName = getDriverPodName(app)
 	}
-	_, err := c.kubeClient.CoreV1().Pods(app.Namespace).Get(context.TODO(), driverPodName, metav1.GetOptions{})
+	_, err := c.kubeClient.CoreV1().
+		Pods(app.Namespace).
+		Get(context.TODO(), driverPodName, metav1.GetOptions{})
 	if err == nil || !errors.IsNotFound(err) {
 		return false
 	}
 
 	sparkUIServiceName := app.Status.DriverInfo.WebUIServiceName
 	if sparkUIServiceName != "" {
-		_, err := c.kubeClient.CoreV1().Services(app.Namespace).Get(context.TODO(), sparkUIServiceName, metav1.GetOptions{})
+		_, err := c.kubeClient.CoreV1().
+			Services(app.Namespace).
+			Get(context.TODO(), sparkUIServiceName, metav1.GetOptions{})
 		if err == nil || !errors.IsNotFound(err) {
 			return false
 		}
@@ -940,7 +1070,9 @@ func (c *Controller) validateSparkResourceDeletion(app *v1beta2.SparkApplication
 
 	sparkUIIngressName := app.Status.DriverInfo.WebUIIngressName
 	if sparkUIIngressName != "" {
-		_, err := c.kubeClient.NetworkingV1().Ingresses(app.Namespace).Get(context.TODO(), sparkUIIngressName, metav1.GetOptions{})
+		_, err := c.kubeClient.NetworkingV1().
+			Ingresses(app.Namespace).
+			Get(context.TODO(), sparkUIIngressName, metav1.GetOptions{})
 		if err == nil || !errors.IsNotFound(err) {
 			return false
 		}
@@ -1008,33 +1140,101 @@ func (c *Controller) recordSparkApplicationEvent(app *v1beta2.SparkApplication) 
 	}
 }
 
-func (c *Controller) recordDriverEvent(app *v1beta2.SparkApplication, phase v1beta2.DriverState, name string) {
+func (c *Controller) recordDriverEvent(
+	app *v1beta2.SparkApplication,
+	phase v1beta2.DriverState,
+	name string,
+) {
 	switch phase {
 	case v1beta2.DriverCompletedState:
-		c.recorder.Eventf(app, apiv1.EventTypeNormal, "SparkDriverCompleted", "Driver %s completed", name)
+		c.recorder.Eventf(
+			app,
+			apiv1.EventTypeNormal,
+			"SparkDriverCompleted",
+			"Driver %s completed",
+			name,
+		)
 	case v1beta2.DriverPendingState:
-		c.recorder.Eventf(app, apiv1.EventTypeNormal, "SparkDriverPending", "Driver %s is pending", name)
+		c.recorder.Eventf(
+			app,
+			apiv1.EventTypeNormal,
+			"SparkDriverPending",
+			"Driver %s is pending",
+			name,
+		)
 	case v1beta2.DriverRunningState:
-		c.recorder.Eventf(app, apiv1.EventTypeNormal, "SparkDriverRunning", "Driver %s is running", name)
+		c.recorder.Eventf(
+			app,
+			apiv1.EventTypeNormal,
+			"SparkDriverRunning",
+			"Driver %s is running",
+			name,
+		)
 	case v1beta2.DriverFailedState:
-		c.recorder.Eventf(app, apiv1.EventTypeWarning, "SparkDriverFailed", "Driver %s failed", name)
+		c.recorder.Eventf(
+			app,
+			apiv1.EventTypeWarning,
+			"SparkDriverFailed",
+			"Driver %s failed",
+			name,
+		)
 	case v1beta2.DriverUnknownState:
-		c.recorder.Eventf(app, apiv1.EventTypeWarning, "SparkDriverUnknownState", "Driver %s in unknown state", name)
+		c.recorder.Eventf(
+			app,
+			apiv1.EventTypeWarning,
+			"SparkDriverUnknownState",
+			"Driver %s in unknown state",
+			name,
+		)
 	}
 }
 
-func (c *Controller) recordExecutorEvent(app *v1beta2.SparkApplication, state v1beta2.ExecutorState, args ...interface{}) {
+func (c *Controller) recordExecutorEvent(
+	app *v1beta2.SparkApplication,
+	state v1beta2.ExecutorState,
+	args ...interface{},
+) {
 	switch state {
 	case v1beta2.ExecutorCompletedState:
-		c.recorder.Eventf(app, apiv1.EventTypeNormal, "SparkExecutorCompleted", "Executor %s completed", args)
+		c.recorder.Eventf(
+			app,
+			apiv1.EventTypeNormal,
+			"SparkExecutorCompleted",
+			"Executor %s completed",
+			args,
+		)
 	case v1beta2.ExecutorPendingState:
-		c.recorder.Eventf(app, apiv1.EventTypeNormal, "SparkExecutorPending", "Executor %s is pending", args)
+		c.recorder.Eventf(
+			app,
+			apiv1.EventTypeNormal,
+			"SparkExecutorPending",
+			"Executor %s is pending",
+			args,
+		)
 	case v1beta2.ExecutorRunningState:
-		c.recorder.Eventf(app, apiv1.EventTypeNormal, "SparkExecutorRunning", "Executor %s is running", args)
+		c.recorder.Eventf(
+			app,
+			apiv1.EventTypeNormal,
+			"SparkExecutorRunning",
+			"Executor %s is running",
+			args,
+		)
 	case v1beta2.ExecutorFailedState:
-		c.recorder.Eventf(app, apiv1.EventTypeWarning, "SparkExecutorFailed", "Executor %s failed with ExitCode: %d, Reason: %s", args)
+		c.recorder.Eventf(
+			app,
+			apiv1.EventTypeWarning,
+			"SparkExecutorFailed",
+			"Executor %s failed with ExitCode: %d, Reason: %s",
+			args,
+		)
 	case v1beta2.ExecutorUnknownState:
-		c.recorder.Eventf(app, apiv1.EventTypeWarning, "SparkExecutorUnknownState", "Executor %s in unknown state", args)
+		c.recorder.Eventf(
+			app,
+			apiv1.EventTypeWarning,
+			"SparkExecutorUnknownState",
+			"Executor %s in unknown state",
+			args,
+		)
 	}
 }
 

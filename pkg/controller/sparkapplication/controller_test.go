@@ -44,7 +44,10 @@ import (
 	"github.com/kubeflow/spark-operator/pkg/util"
 )
 
-func newFakeController(app *v1beta2.SparkApplication, pods ...*apiv1.Pod) (*Controller, *record.FakeRecorder) {
+func newFakeController(
+	app *v1beta2.SparkApplication,
+	pods ...*apiv1.Pod,
+) (*Controller, *record.FakeRecorder) {
 	crdclientfake.AddToScheme(scheme.Scheme)
 	crdClient := crdclientfake.NewSimpleClientset()
 	kubeClient := kubeclientfake.NewSimpleClientset()
@@ -67,8 +70,18 @@ func newFakeController(app *v1beta2.SparkApplication, pods ...*apiv1.Pod) (*Cont
 	}, metav1.CreateOptions{})
 
 	podInformerFactory := informers.NewSharedInformerFactory(kubeClient, 0*time.Second)
-	controller := newSparkApplicationController(crdClient, kubeClient, informerFactory, podInformerFactory, recorder,
-		&util.MetricConfig{}, "", "", nil, true)
+	controller := newSparkApplicationController(
+		crdClient,
+		kubeClient,
+		informerFactory,
+		podInformerFactory,
+		recorder,
+		&util.MetricConfig{},
+		"",
+		"",
+		nil,
+		true,
+	)
 
 	informer := informerFactory.Sparkoperator().V1beta2().SparkApplications().Informer()
 	if app != nil {
@@ -153,7 +166,9 @@ func TestOnUpdate(t *testing.T) {
 	assert.True(t, strings.Contains(event, "SparkApplicationSpecUpdateFailed"))
 
 	// Case3: Spec update successful.
-	ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(appTemplate.Namespace).Create(context.TODO(), appTemplate, metav1.CreateOptions{})
+	ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(appTemplate.Namespace).
+		Create(context.TODO(), appTemplate, metav1.CreateOptions{})
 	ctrl.onUpdate(appTemplate, copyWithSpecUpdate)
 
 	// Verify App was enqueued.
@@ -170,7 +185,9 @@ func TestOnUpdate(t *testing.T) {
 	assert.True(t, strings.Contains(event, "SparkApplicationSpecUpdateProcessed"))
 
 	// Verify the SparkApplication state was updated to InvalidatingState.
-	app, err := ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(appTemplate.Namespace).Get(context.TODO(), appTemplate.Name, metav1.GetOptions{})
+	app, err := ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(appTemplate.Namespace).
+		Get(context.TODO(), appTemplate.Name, metav1.GetOptions{})
 	assert.Nil(t, err)
 	assert.Equal(t, v1beta2.InvalidatingState, app.Status.AppState.State)
 }
@@ -261,7 +278,9 @@ func TestSyncSparkApplication_SubmissionFailed(t *testing.T) {
 	}
 
 	ctrl, recorder := newFakeController(app)
-	_, err := ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Create(context.TODO(), app, metav1.CreateOptions{})
+	_, err := ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Create(context.TODO(), app, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,13 +295,23 @@ func TestSyncSparkApplication_SubmissionFailed(t *testing.T) {
 
 	// Attempt 1
 	err = ctrl.syncSparkApplication("default/foo")
-	updatedApp, err := ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Get(context.TODO(), app.Name, metav1.GetOptions{})
+	updatedApp, err := ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Get(context.TODO(), app.Name, metav1.GetOptions{})
 
 	assert.Equal(t, v1beta2.FailedSubmissionState, updatedApp.Status.AppState.State)
 	assert.Equal(t, int32(1), updatedApp.Status.SubmissionAttempts)
 	assert.Equal(t, float64(1), fetchCounterValue(ctrl.metrics.sparkAppCount, map[string]string{}))
-	assert.Equal(t, float64(0), fetchCounterValue(ctrl.metrics.sparkAppSubmitCount, map[string]string{}))
-	assert.Equal(t, float64(1), fetchCounterValue(ctrl.metrics.sparkAppFailedSubmissionCount, map[string]string{}))
+	assert.Equal(
+		t,
+		float64(0),
+		fetchCounterValue(ctrl.metrics.sparkAppSubmitCount, map[string]string{}),
+	)
+	assert.Equal(
+		t,
+		float64(1),
+		fetchCounterValue(ctrl.metrics.sparkAppFailedSubmissionCount, map[string]string{}),
+	)
 
 	event := <-recorder.Events
 	assert.True(t, strings.Contains(event, "SparkApplicationAdded"))
@@ -290,35 +319,51 @@ func TestSyncSparkApplication_SubmissionFailed(t *testing.T) {
 	assert.True(t, strings.Contains(event, "SparkApplicationSubmissionFailed"))
 
 	// Attempt 2: Retry again.
-	updatedApp.Status.LastSubmissionAttemptTime = metav1.Time{Time: metav1.Now().Add(-100 * time.Second)}
+	updatedApp.Status.LastSubmissionAttemptTime = metav1.Time{
+		Time: metav1.Now().Add(-100 * time.Second),
+	}
 	ctrl, recorder = newFakeController(updatedApp)
-	_, err = ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Create(context.TODO(), updatedApp, metav1.CreateOptions{})
+	_, err = ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Create(context.TODO(), updatedApp, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = ctrl.syncSparkApplication("default/foo")
 
 	// Verify that the application failed again.
-	updatedApp, err = ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Get(context.TODO(), app.Name, metav1.GetOptions{})
+	updatedApp, err = ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Get(context.TODO(), app.Name, metav1.GetOptions{})
 	assert.Nil(t, err)
 	assert.Equal(t, v1beta2.FailedSubmissionState, updatedApp.Status.AppState.State)
 	assert.Equal(t, int32(2), updatedApp.Status.SubmissionAttempts)
-	assert.Equal(t, float64(0), fetchCounterValue(ctrl.metrics.sparkAppSubmitCount, map[string]string{}))
+	assert.Equal(
+		t,
+		float64(0),
+		fetchCounterValue(ctrl.metrics.sparkAppSubmitCount, map[string]string{}),
+	)
 
 	event = <-recorder.Events
 	assert.True(t, strings.Contains(event, "SparkApplicationSubmissionFailed"))
 
 	// Attempt 3: No more retries.
-	updatedApp.Status.LastSubmissionAttemptTime = metav1.Time{Time: metav1.Now().Add(-100 * time.Second)}
+	updatedApp.Status.LastSubmissionAttemptTime = metav1.Time{
+		Time: metav1.Now().Add(-100 * time.Second),
+	}
 	ctrl, recorder = newFakeController(updatedApp)
-	_, err = ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Create(context.TODO(), updatedApp, metav1.CreateOptions{})
+	_, err = ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Create(context.TODO(), updatedApp, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = ctrl.syncSparkApplication("default/foo")
 
 	// Verify that the application failed again.
-	updatedApp, err = ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Get(context.TODO(), app.Name, metav1.GetOptions{})
+	updatedApp, err = ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Get(context.TODO(), app.Name, metav1.GetOptions{})
 	assert.Nil(t, err)
 	assert.Equal(t, v1beta2.FailedState, updatedApp.Status.AppState.State)
 	// No more submission attempts made.
@@ -452,7 +497,8 @@ func TestShouldRetry(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "foo",
 					Namespace: "default",
-				}},
+				},
+			},
 			shouldRetry: false,
 		},
 		{
@@ -592,7 +638,9 @@ func TestSyncSparkApplication_SubmissionSuccess(t *testing.T) {
 
 	testFn := func(test testcase, t *testing.T) {
 		ctrl, _ := newFakeController(test.app)
-		_, err := ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(test.app.Namespace).Create(context.TODO(), test.app, metav1.CreateOptions{})
+		_, err := ctrl.crdClient.SparkoperatorV1beta2().
+			SparkApplications(test.app.Namespace).
+			Create(context.TODO(), test.app, metav1.CreateOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -607,14 +655,24 @@ func TestSyncSparkApplication_SubmissionSuccess(t *testing.T) {
 
 		err = ctrl.syncSparkApplication(fmt.Sprintf("%s/%s", test.app.Namespace, test.app.Name))
 		assert.Nil(t, err)
-		updatedApp, err := ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(test.app.Namespace).Get(context.TODO(), test.app.Name, metav1.GetOptions{})
+		updatedApp, err := ctrl.crdClient.SparkoperatorV1beta2().
+			SparkApplications(test.app.Namespace).
+			Get(context.TODO(), test.app.Name, metav1.GetOptions{})
 		assert.Nil(t, err)
 		assert.Equal(t, test.expectedState, updatedApp.Status.AppState.State)
 		if test.app.Status.AppState.State == v1beta2.NewState {
-			assert.Equal(t, float64(1), fetchCounterValue(ctrl.metrics.sparkAppCount, map[string]string{}))
+			assert.Equal(
+				t,
+				float64(1),
+				fetchCounterValue(ctrl.metrics.sparkAppCount, map[string]string{}),
+			)
 		}
 		if test.expectedState == v1beta2.SubmittedState {
-			assert.Equal(t, float64(1), fetchCounterValue(ctrl.metrics.sparkAppSubmitCount, map[string]string{}))
+			assert.Equal(
+				t,
+				float64(1),
+				fetchCounterValue(ctrl.metrics.sparkAppSubmitCount, map[string]string{}),
+			)
 		}
 	}
 
@@ -642,7 +700,8 @@ func TestSyncSparkApplication_SubmissionSuccess(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "foo",
 					Namespace: "default",
-				}},
+				},
+			},
 			expectedState: v1beta2.SubmittedState,
 		},
 		{
@@ -692,7 +751,9 @@ func TestSyncSparkApplication_SubmissionSuccess(t *testing.T) {
 					AppState: v1beta2.ApplicationState{
 						State: v1beta2.FailedSubmissionState,
 					},
-					LastSubmissionAttemptTime: metav1.Time{Time: metav1.Now().Add(-2000 * time.Second)},
+					LastSubmissionAttemptTime: metav1.Time{
+						Time: metav1.Now().Add(-2000 * time.Second),
+					},
 				},
 			},
 			expectedState: v1beta2.FailedSubmissionState,
@@ -710,8 +771,10 @@ func TestSyncSparkApplication_SubmissionSuccess(t *testing.T) {
 					AppState: v1beta2.ApplicationState{
 						State: v1beta2.FailedSubmissionState,
 					},
-					SubmissionAttempts:        1,
-					LastSubmissionAttemptTime: metav1.Time{Time: metav1.Now().Add(-2000 * time.Second)},
+					SubmissionAttempts: 1,
+					LastSubmissionAttemptTime: metav1.Time{
+						Time: metav1.Now().Add(-2000 * time.Second),
+					},
 				},
 			},
 			expectedState: v1beta2.SubmittedState,
@@ -908,8 +971,10 @@ func TestSyncSparkApplication_SubmissionSuccess(t *testing.T) {
 					AppState: v1beta2.ApplicationState{
 						State: v1beta2.FailedSubmissionState,
 					},
-					SubmissionAttempts:        1,
-					LastSubmissionAttemptTime: metav1.Time{Time: metav1.Now().Add(-2000 * time.Second)},
+					SubmissionAttempts: 1,
+					LastSubmissionAttemptTime: metav1.Time{
+						Time: metav1.Now().Add(-2000 * time.Second),
+					},
 				},
 				Spec: v1beta2.SparkApplicationSpec{
 					RestartPolicy: restartPolicyOnFailure,
@@ -967,11 +1032,15 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 
 	testcases := []testcase{
 		{
-			appName:               appName,
-			oldAppStatus:          v1beta2.SubmittedState,
-			oldExecutorStatus:     map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorRunningState},
-			expectedAppState:      v1beta2.FailingState,
-			expectedExecutorState: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorFailedState},
+			appName:      appName,
+			oldAppStatus: v1beta2.SubmittedState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorRunningState,
+			},
+			expectedAppState: v1beta2.FailingState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorFailedState,
+			},
 			expectedAppMetrics: metrics{
 				failedMetricCount: 1,
 			},
@@ -980,9 +1049,11 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 			},
 		},
 		{
-			appName:           appName,
-			oldAppStatus:      v1beta2.SubmittedState,
-			oldExecutorStatus: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorRunningState},
+			appName:      appName,
+			oldAppStatus: v1beta2.SubmittedState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorRunningState,
+			},
 			driverPod: &apiv1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      driverPodName,
@@ -1011,8 +1082,10 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 					Phase: apiv1.PodSucceeded,
 				},
 			},
-			expectedAppState:      v1beta2.RunningState,
-			expectedExecutorState: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorCompletedState},
+			expectedAppState: v1beta2.RunningState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorCompletedState,
+			},
 			expectedAppMetrics: metrics{
 				runningMetricCount: 1,
 			},
@@ -1021,9 +1094,11 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 			},
 		},
 		{
-			appName:           appName,
-			oldAppStatus:      v1beta2.RunningState,
-			oldExecutorStatus: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorRunningState},
+			appName:      appName,
+			oldAppStatus: v1beta2.RunningState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorRunningState,
+			},
 			driverPod: &apiv1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      driverPodName,
@@ -1068,17 +1143,21 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 					Phase: apiv1.PodSucceeded,
 				},
 			},
-			expectedAppState:      v1beta2.RunningState,
-			expectedExecutorState: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorCompletedState},
-			expectedAppMetrics:    metrics{},
+			expectedAppState: v1beta2.RunningState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorCompletedState,
+			},
+			expectedAppMetrics: metrics{},
 			expectedExecutorMetrics: executorMetrics{
 				successMetricCount: 1,
 			},
 		},
 		{
-			appName:           appName,
-			oldAppStatus:      v1beta2.RunningState,
-			oldExecutorStatus: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorRunningState},
+			appName:      appName,
+			oldAppStatus: v1beta2.RunningState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorRunningState,
+			},
 			driverPod: &apiv1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      driverPodName,
@@ -1123,8 +1202,10 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 					Phase: apiv1.PodSucceeded,
 				},
 			},
-			expectedAppState:      v1beta2.SucceedingState,
-			expectedExecutorState: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorCompletedState},
+			expectedAppState: v1beta2.SucceedingState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorCompletedState,
+			},
 			expectedAppMetrics: metrics{
 				successMetricCount: 1,
 			},
@@ -1133,9 +1214,11 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 			},
 		},
 		{
-			appName:           appName,
-			oldAppStatus:      v1beta2.RunningState,
-			oldExecutorStatus: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorRunningState},
+			appName:      appName,
+			oldAppStatus: v1beta2.RunningState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorRunningState,
+			},
 			driverPod: &apiv1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      driverPodName,
@@ -1181,8 +1264,10 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 					Phase: apiv1.PodSucceeded,
 				},
 			},
-			expectedAppState:      v1beta2.FailingState,
-			expectedExecutorState: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorCompletedState},
+			expectedAppState: v1beta2.FailingState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorCompletedState,
+			},
 			expectedAppMetrics: metrics{
 				failedMetricCount: 1,
 			},
@@ -1191,9 +1276,11 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 			},
 		},
 		{
-			appName:           appName,
-			oldAppStatus:      v1beta2.RunningState,
-			oldExecutorStatus: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorRunningState},
+			appName:      appName,
+			oldAppStatus: v1beta2.RunningState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorRunningState,
+			},
 			driverPod: &apiv1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      driverPodName,
@@ -1244,8 +1331,10 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 					},
 				},
 			},
-			expectedAppState:      v1beta2.FailingState,
-			expectedExecutorState: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorFailedState},
+			expectedAppState: v1beta2.FailingState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorFailedState,
+			},
 			expectedAppMetrics: metrics{
 				failedMetricCount: 1,
 			},
@@ -1254,9 +1343,11 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 			},
 		},
 		{
-			appName:           appName,
-			oldAppStatus:      v1beta2.RunningState,
-			oldExecutorStatus: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorRunningState},
+			appName:      appName,
+			oldAppStatus: v1beta2.RunningState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorRunningState,
+			},
 			driverPod: &apiv1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      driverPodName,
@@ -1304,8 +1395,10 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 					Phase: apiv1.PodSucceeded,
 				},
 			},
-			expectedAppState:      v1beta2.SucceedingState,
-			expectedExecutorState: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorCompletedState},
+			expectedAppState: v1beta2.SucceedingState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorCompletedState,
+			},
 			expectedAppMetrics: metrics{
 				successMetricCount: 1,
 			},
@@ -1314,18 +1407,24 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 			},
 		},
 		{
-			appName:                 appName,
-			oldAppStatus:            v1beta2.FailingState,
-			oldExecutorStatus:       map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorFailedState},
-			expectedAppState:        v1beta2.FailedState,
-			expectedExecutorState:   map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorFailedState},
+			appName:      appName,
+			oldAppStatus: v1beta2.FailingState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorFailedState,
+			},
+			expectedAppState: v1beta2.FailedState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorFailedState,
+			},
 			expectedAppMetrics:      metrics{},
 			expectedExecutorMetrics: executorMetrics{},
 		},
 		{
-			appName:           appName,
-			oldAppStatus:      v1beta2.RunningState,
-			oldExecutorStatus: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorRunningState},
+			appName:      appName,
+			oldAppStatus: v1beta2.RunningState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorRunningState,
+			},
 			driverPod: &apiv1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      driverPodName,
@@ -1354,8 +1453,10 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 					Phase: apiv1.PodSucceeded,
 				},
 			},
-			expectedAppState:      v1beta2.SucceedingState,
-			expectedExecutorState: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorCompletedState},
+			expectedAppState: v1beta2.SucceedingState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorCompletedState,
+			},
 			expectedAppMetrics: metrics{
 				successMetricCount: 1,
 			},
@@ -1364,11 +1465,15 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 			},
 		},
 		{
-			appName:                 appName,
-			oldAppStatus:            v1beta2.SucceedingState,
-			oldExecutorStatus:       map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorCompletedState},
-			expectedAppState:        v1beta2.CompletedState,
-			expectedExecutorState:   map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorCompletedState},
+			appName:      appName,
+			oldAppStatus: v1beta2.SucceedingState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorCompletedState,
+			},
+			expectedAppState: v1beta2.CompletedState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorCompletedState,
+			},
 			expectedAppMetrics:      metrics{},
 			expectedExecutorMetrics: executorMetrics{},
 		},
@@ -1402,15 +1507,19 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 					Phase: apiv1.PodPending,
 				},
 			},
-			expectedAppState:        v1beta2.UnknownState,
-			expectedExecutorState:   map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorPendingState},
+			expectedAppState: v1beta2.UnknownState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorPendingState,
+			},
 			expectedAppMetrics:      metrics{},
 			expectedExecutorMetrics: executorMetrics{},
 		},
 		{
-			appName:           appName,
-			oldAppStatus:      v1beta2.CompletedState,
-			oldExecutorStatus: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorPendingState},
+			appName:      appName,
+			oldAppStatus: v1beta2.CompletedState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorPendingState,
+			},
 			driverPod: &apiv1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      driverPodName,
@@ -1425,17 +1534,21 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 					Phase: apiv1.PodSucceeded,
 				},
 			},
-			expectedAppState:      v1beta2.CompletedState,
-			expectedExecutorState: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorCompletedState},
-			expectedAppMetrics:    metrics{},
+			expectedAppState: v1beta2.CompletedState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorCompletedState,
+			},
+			expectedAppMetrics: metrics{},
 			expectedExecutorMetrics: executorMetrics{
 				successMetricCount: 1,
 			},
 		},
 		{
-			appName:           appName,
-			oldAppStatus:      v1beta2.RunningState,
-			oldExecutorStatus: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorRunningState},
+			appName:      appName,
+			oldAppStatus: v1beta2.RunningState,
+			oldExecutorStatus: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorRunningState,
+			},
 			driverPod: &apiv1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      driverPodName,
@@ -1450,8 +1563,10 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 					Phase: apiv1.PodRunning,
 				},
 			},
-			expectedAppState:        v1beta2.RunningState,
-			expectedExecutorState:   map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorUnknownState},
+			expectedAppState: v1beta2.RunningState,
+			expectedExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorUnknownState,
+			},
 			expectedAppMetrics:      metrics{},
 			expectedExecutorMetrics: executorMetrics{},
 		},
@@ -1463,30 +1578,46 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 		app.Name = test.appName
 		app.Status.ExecutionAttempts = 1
 		ctrl, _ := newFakeController(app, test.driverPod, test.executorPod)
-		_, err := ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Create(context.TODO(), app, metav1.CreateOptions{})
+		_, err := ctrl.crdClient.SparkoperatorV1beta2().
+			SparkApplications(app.Namespace).
+			Create(context.TODO(), app, metav1.CreateOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if test.driverPod != nil {
-			ctrl.kubeClient.CoreV1().Pods(app.Namespace).Create(context.TODO(), test.driverPod, metav1.CreateOptions{})
+			ctrl.kubeClient.CoreV1().
+				Pods(app.Namespace).
+				Create(context.TODO(), test.driverPod, metav1.CreateOptions{})
 		}
 		if test.executorPod != nil {
-			ctrl.kubeClient.CoreV1().Pods(app.Namespace).Create(context.TODO(), test.executorPod, metav1.CreateOptions{})
+			ctrl.kubeClient.CoreV1().
+				Pods(app.Namespace).
+				Create(context.TODO(), test.executorPod, metav1.CreateOptions{})
 		}
 
 		err = ctrl.syncSparkApplication(fmt.Sprintf("%s/%s", app.Namespace, app.Name))
 		assert.Nil(t, err)
 		// Verify application and executor states.
-		updatedApp, err := ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Get(context.TODO(), app.Name, metav1.GetOptions{})
+		updatedApp, err := ctrl.crdClient.SparkoperatorV1beta2().
+			SparkApplications(app.Namespace).
+			Get(context.TODO(), app.Name, metav1.GetOptions{})
 		assert.Equal(t, test.expectedAppState, updatedApp.Status.AppState.State)
 		assert.Equal(t, test.expectedExecutorState, updatedApp.Status.ExecutorState)
 
 		// Validate error message if the driver pod failed.
 		if test.driverPod != nil && test.driverPod.Status.Phase == apiv1.PodFailed {
-			if len(test.driverPod.Status.ContainerStatuses) > 0 && test.driverPod.Status.ContainerStatuses[0].State.Terminated != nil {
+			if len(test.driverPod.Status.ContainerStatuses) > 0 &&
+				test.driverPod.Status.ContainerStatuses[0].State.Terminated != nil {
 				if test.driverPod.Status.ContainerStatuses[0].State.Terminated.ExitCode != 0 {
-					assert.Equal(t, updatedApp.Status.AppState.ErrorMessage,
-						fmt.Sprintf("driver container failed with ExitCode: %d, Reason: %s", test.driverPod.Status.ContainerStatuses[0].State.Terminated.ExitCode, test.driverPod.Status.ContainerStatuses[0].State.Terminated.Reason))
+					assert.Equal(
+						t,
+						updatedApp.Status.AppState.ErrorMessage,
+						fmt.Sprintf(
+							"driver container failed with ExitCode: %d, Reason: %s",
+							test.driverPod.Status.ContainerStatuses[0].State.Terminated.ExitCode,
+							test.driverPod.Status.ContainerStatuses[0].State.Terminated.Reason,
+						),
+					)
 				}
 			} else {
 				assert.Equal(t, updatedApp.Status.AppState.ErrorMessage, "driver container status missing")
@@ -1494,15 +1625,43 @@ func TestSyncSparkApplication_ExecutingState(t *testing.T) {
 		}
 
 		// Verify application metrics.
-		assert.Equal(t, test.expectedAppMetrics.runningMetricCount, ctrl.metrics.sparkAppRunningCount.Value(map[string]string{}))
-		assert.Equal(t, test.expectedAppMetrics.successMetricCount, fetchCounterValue(ctrl.metrics.sparkAppSuccessCount, map[string]string{}))
-		assert.Equal(t, test.expectedAppMetrics.submitMetricCount, fetchCounterValue(ctrl.metrics.sparkAppSubmitCount, map[string]string{}))
-		assert.Equal(t, test.expectedAppMetrics.failedMetricCount, fetchCounterValue(ctrl.metrics.sparkAppFailureCount, map[string]string{}))
+		assert.Equal(
+			t,
+			test.expectedAppMetrics.runningMetricCount,
+			ctrl.metrics.sparkAppRunningCount.Value(map[string]string{}),
+		)
+		assert.Equal(
+			t,
+			test.expectedAppMetrics.successMetricCount,
+			fetchCounterValue(ctrl.metrics.sparkAppSuccessCount, map[string]string{}),
+		)
+		assert.Equal(
+			t,
+			test.expectedAppMetrics.submitMetricCount,
+			fetchCounterValue(ctrl.metrics.sparkAppSubmitCount, map[string]string{}),
+		)
+		assert.Equal(
+			t,
+			test.expectedAppMetrics.failedMetricCount,
+			fetchCounterValue(ctrl.metrics.sparkAppFailureCount, map[string]string{}),
+		)
 
 		// Verify executor metrics.
-		assert.Equal(t, test.expectedExecutorMetrics.runningMetricCount, ctrl.metrics.sparkAppExecutorRunningCount.Value(map[string]string{}))
-		assert.Equal(t, test.expectedExecutorMetrics.successMetricCount, fetchCounterValue(ctrl.metrics.sparkAppExecutorSuccessCount, map[string]string{}))
-		assert.Equal(t, test.expectedExecutorMetrics.failedMetricCount, fetchCounterValue(ctrl.metrics.sparkAppExecutorFailureCount, map[string]string{}))
+		assert.Equal(
+			t,
+			test.expectedExecutorMetrics.runningMetricCount,
+			ctrl.metrics.sparkAppExecutorRunningCount.Value(map[string]string{}),
+		)
+		assert.Equal(
+			t,
+			test.expectedExecutorMetrics.successMetricCount,
+			fetchCounterValue(ctrl.metrics.sparkAppExecutorSuccessCount, map[string]string{}),
+		)
+		assert.Equal(
+			t,
+			test.expectedExecutorMetrics.failedMetricCount,
+			fetchCounterValue(ctrl.metrics.sparkAppExecutorFailureCount, map[string]string{}),
+		)
 	}
 
 	for _, test := range testcases {
@@ -1541,30 +1700,45 @@ func TestSyncSparkApplication_ApplicationExpired(t *testing.T) {
 			TerminationTime: metav1.Time{
 				Time: terminationTime,
 			},
-			ExecutorState: map[string]v1beta2.ExecutorState{"exec-1": v1beta2.ExecutorCompletedState},
+			ExecutorState: map[string]v1beta2.ExecutorState{
+				"exec-1": v1beta2.ExecutorCompletedState,
+			},
 		},
 	}
 
 	ctrl, _ := newFakeController(app)
-	_, err := ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Create(context.TODO(), app, metav1.CreateOptions{})
+	_, err := ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Create(context.TODO(), app, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = ctrl.syncSparkApplication(fmt.Sprintf("%s/%s", app.Namespace, app.Name))
 	assert.Nil(t, err)
 
-	_, err = ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Get(context.TODO(), app.Name, metav1.GetOptions{})
+	_, err = ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Get(context.TODO(), app.Name, metav1.GetOptions{})
 	assert.True(t, errors.IsNotFound(err))
 }
 
 func TestIsNextRetryDue(t *testing.T) {
 	// Failure cases.
 	assert.False(t, isNextRetryDue(nil, 3, metav1.Time{Time: metav1.Now().Add(-100 * time.Second)}))
-	assert.False(t, isNextRetryDue(int64ptr(5), 0, metav1.Time{Time: metav1.Now().Add(-100 * time.Second)}))
+	assert.False(
+		t,
+		isNextRetryDue(int64ptr(5), 0, metav1.Time{Time: metav1.Now().Add(-100 * time.Second)}),
+	)
 	assert.False(t, isNextRetryDue(int64ptr(5), 3, metav1.Time{}))
 	// Not enough time passed.
-	assert.False(t, isNextRetryDue(int64ptr(50), 3, metav1.Time{Time: metav1.Now().Add(-100 * time.Second)}))
-	assert.True(t, isNextRetryDue(int64ptr(50), 3, metav1.Time{Time: metav1.Now().Add(-151 * time.Second)}))
+	assert.False(
+		t,
+		isNextRetryDue(int64ptr(50), 3, metav1.Time{Time: metav1.Now().Add(-100 * time.Second)}),
+	)
+	assert.True(
+		t,
+		isNextRetryDue(int64ptr(50), 3, metav1.Time{Time: metav1.Now().Add(-151 * time.Second)}),
+	)
 }
 
 func TestIngressWithSubpathAffectsSparkConfiguration(t *testing.T) {
@@ -1590,17 +1764,23 @@ func TestIngressWithSubpathAffectsSparkConfiguration(t *testing.T) {
 	ctrl, _ := newFakeController(app)
 	ctrl.ingressURLFormat = "example.com/{{$appNamespace}}/{{$appName}}"
 	ctrl.enableUIService = true
-	_, err := ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Create(context.TODO(), app, metav1.CreateOptions{})
+	_, err := ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Create(context.TODO(), app, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = ctrl.syncSparkApplication(fmt.Sprintf("%s/%s", app.Namespace, app.Name))
 	assert.Nil(t, err)
-	deployedApp, err := ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Get(context.TODO(), app.Name, metav1.GetOptions{})
+	deployedApp, err := ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Get(context.TODO(), app.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ingresses, err := ctrl.kubeClient.NetworkingV1().Ingresses(app.Namespace).List(context.TODO(), metav1.ListOptions{})
+	ingresses, err := ctrl.kubeClient.NetworkingV1().
+		Ingresses(app.Namespace).
+		List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1615,7 +1795,9 @@ func TestIngressWithSubpathAffectsSparkConfiguration(t *testing.T) {
 		t.Log("The spark configuration does not reflect the subpath expected by the ingress")
 	}
 	if deployedApp.Spec.SparkConf["spark.ui.proxyRedirectUri"] != "/" {
-		t.Log("The spark configuration does not reflect the proxyRedirectUri expected by the ingress")
+		t.Log(
+			"The spark configuration does not reflect the proxyRedirectUri expected by the ingress",
+		)
 	}
 }
 
@@ -1643,24 +1825,31 @@ func TestIngressWithClassName(t *testing.T) {
 	ctrl.ingressURLFormat = "{{$appNamespace}}.{{$appName}}.example.com"
 	ctrl.ingressClassName = "nginx"
 	ctrl.enableUIService = true
-	_, err := ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Create(context.TODO(), app, metav1.CreateOptions{})
+	_, err := ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Create(context.TODO(), app, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = ctrl.syncSparkApplication(fmt.Sprintf("%s/%s", app.Namespace, app.Name))
 	assert.Nil(t, err)
-	_, err = ctrl.crdClient.SparkoperatorV1beta2().SparkApplications(app.Namespace).Get(context.TODO(), app.Name, metav1.GetOptions{})
+	_, err = ctrl.crdClient.SparkoperatorV1beta2().
+		SparkApplications(app.Namespace).
+		Get(context.TODO(), app.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ingresses, err := ctrl.kubeClient.NetworkingV1().Ingresses(app.Namespace).List(context.TODO(), metav1.ListOptions{})
+	ingresses, err := ctrl.kubeClient.NetworkingV1().
+		Ingresses(app.Namespace).
+		List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ingresses == nil || ingresses.Items == nil || len(ingresses.Items) != 1 {
 		t.Fatal("The ingress does not exist, has no items, or wrong amount of items")
 	}
-	if ingresses.Items[0].Spec.IngressClassName == nil || *ingresses.Items[0].Spec.IngressClassName != "nginx" {
+	if ingresses.Items[0].Spec.IngressClassName == nil ||
+		*ingresses.Items[0].Spec.IngressClassName != "nginx" {
 		t.Fatal("The ingressClassName does not exists, or wrong value is set")
 	}
 }
