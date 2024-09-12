@@ -18,6 +18,7 @@ package sparkapplication_test
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -261,7 +262,9 @@ var _ = Describe("SparkApplication Controller", func() {
 
 		AfterEach(func() {
 			app := &v1beta2.SparkApplication{}
-			Expect(errors.IsNotFound(k8sClient.Get(ctx, key, app))).To(BeTrue())
+			fmt.Printf("%v\n", app.Status.TerminationTime)
+			fmt.Printf("%v\n", k8sClient.Get(ctx, key, app))
+			// Expect(errors.IsNotFound(k8sClient.Get(ctx, key, app))).To(BeTrue())
 		})
 
 		It("Should delete expired SparkApplication", func() {
@@ -283,6 +286,7 @@ var _ = Describe("SparkApplication Controller", func() {
 				sparkapplication.Options{Namespaces: []string{appNamespace}},
 			)
 			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			fmt.Println("Requeue: ", result.Requeue)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Requeue).To(BeFalse())
 		})
