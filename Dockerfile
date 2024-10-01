@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-ARG SPARK_IMAGE=spark:3.5.2
+ARG SPARK_IMAGE=spark:3.5.1-scala2.12-java17-ubuntu
 
 FROM golang:1.23.1 AS builder
 
